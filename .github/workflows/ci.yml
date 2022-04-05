@@ -1,0 +1,125 @@
+name: UploadCAF
+
+on:
+  workflow_dispatch:
+     inputs:
+       username:
+         description: 'Username'
+         required: true
+         default: 'laityts'
+       email:
+         description: 'E-Mail'
+         required: true
+         default: 'laityts@gmail.com'
+       token:
+         description: 'TELEGRAM_TOKEN'
+         required: true
+         default: '5249351156:AAGGpIC3CjRjkCnXk-dHj_aLsQ-t-zSbRx4'
+       chatid:
+         description: 'CHATID'
+         required: true
+         default: '-1001326861531'
+       kernel:
+         description: 'CAF Kernel'
+         required: true
+         default: 'msm-4.14'
+       source:
+         description: 'Mirror Source URL'
+         required: true
+         default: 'https://source.codeaurora.org'
+       tag:
+         description: 'CAF TAG'
+         required: true
+         default: 'LA.UM.9.11.r1-05100-NICOBAR.0'
+       branch:
+         description: 'Change branch '
+         required: true
+         default: 'LA.UM.9.11.r1-05100-NICOBAR.0'
+       origin:
+         description: 'Origin '
+         required: true
+         default: 'git@github.com:laityts/android_kernel_xiaomi_sm6125.git'
+
+jobs:
+  UploadCAF:
+    runs-on: ubuntu-18.04
+    continue-on-error: false
+    env:
+      status: true
+
+    steps:
+      - name: checkout
+        uses: actions/checkout@v2
+
+      - name: env
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y git wget curl openssh-server
+
+      - name: Generate SSH Keys
+        run: |
+          echo $PWD
+          echo "创建SSH Keys"
+          ls
+          ssh-keygen -q -f "$HOME/.ssh/id_rsa" -N '' -t rsa -C "${{ github.event.inputs.email }}"
+          ls -al $HOME/.ssh/
+          cat $HOME/.ssh/id_rsa
+          cat $HOME/.ssh/id_rsa.pub
+          cat ssh/id_rsa > $HOME/.ssh/id_rsa
+          cat ssh/id_rsa.pub > $HOME/.ssh/id_rsa.pub
+          diff ssh/id_rsa $HOME/.ssh/id_rsa || true
+          diff ssh/id_rsa.pub $HOME/.ssh/id_rsa.pub || true
+          ls -al $HOME/.ssh/
+          cat $HOME/.ssh/id_rsa
+          cat $HOME/.ssh/id_rsa.pub
+          git config --global user.email "${{ github.event.inputs.email }}"
+          git config --global user.name "${{ github.event.inputs.username }}"
+
+      - name: CloneCAF
+        if: env.status == 'true'
+        run: |
+          echo $PWD
+          echo "克隆CAF源码"
+          echo $GITHUB_REPOSITORY
+          git clone ${{ github.event.inputs.source }}/quic/la/kernel/${{ github.event.inputs.kernel }}/ -b ${{ github.event.inputs.tag }} > /dev/null 2>&1
+          echo "进入工作目录"
+          cd ${{ github.event.inputs.kernel }}
+          git branch -v
+          ls
+          echo "切换分支"
+          git switch -c ${{ github.event.inputs.tag }}
+          git branch -m ${{ github.event.inputs.tag }} ${{ github.event.inputs.branch }}
+          git remote remove origin
+          git remote add origin ${{ github.event.inputs.origin }}
+          cd ..
+          ls -al $HOME/.ssh/
+
+      - name: Add Subtree
+        if: env.status == 'true'
+        run: |
+          echo $PWD
+          echo "添加子模块"
+          cd ${{ github.event.inputs.kernel }}
+          git subtree add --prefix=drivers/staging/fw-api ${{ github.event.inputs.source }}/quic/la/platform/vendor/qcom-opensource/wlan/fw-api ${{ github.event.inputs.tag }}
+          git subtree add --prefix=drivers/staging/qcacld-3.0 ${{ github.event.inputs.source }}/quic/la/platform/vendor/qcom-opensource/wlan/qcacld-3.0 ${{ github.event.inputs.tag }}
+          git subtree add --prefix=drivers/staging/qca-wifi-host-cmn ${{ github.event.inputs.source }}/quic/la/platform/vendor/qcom-opensource/wlan/qca-wifi-host-cmn ${{ github.event.inputs.tag }}
+          git subtree add --prefix=techpack/audio ${{ github.event.inputs.source }}/quic/la/platform/vendor/opensource/audio-kernel ${{ github.event.inputs.tag }}
+          git log -5
+          cd ..
+
+      - name: UploadCAF
+        if: env.status == 'true'
+        run: |
+          echo $PWD
+          echo "上传caf到指定仓库"
+          cd ${{ github.event.inputs.kernel }}
+          until git push origin HEAD --force
+          do
+            sleep 10s
+            echo "等待导入SSH Keys..."
+            curl -s -X POST https://api.telegram.org/bot${{ github.event.inputs.token }}/sendMessage -d text="等待导入SSH Keys..." -d chat_id=${{ github.event.inputs.chatid }} -d parse_mode=HTML
+          done
+          echo $?
+          if [ $? -eq 0 ]; then
+            curl -s -X POST https://api.telegram.org/bot${{ github.event.inputs.token }}/sendMessage -d text="Push Complete" -d chat_id=${{ github.event.inputs.chatid }} -d parse_mode=HTML
+          fi
